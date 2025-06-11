@@ -303,6 +303,58 @@ private:
     amrex::Vector<amrex::Real> m_postprocess_enforce_dt_tol;
     amrex::Vector<amrex::Real> m_postprocess_time_interval;
     amrex::Vector<amrex::Real> m_postprocess_time_delay;
+
+    // --------------------------------------------------
+    // EWS overrides
+    // --------------------------------------------------
+
+    //! If true, reset simulation timer and indices on restart
+    //! (EWS.reset_timer_on_restart)
+    bool m_ews_reset_timer_on_restart{false};
+
+    //! If true, perform a regrid before the first timestep after restart
+    //! (EWS.regrid_on_before_first_timestep)
+    bool m_ews_regrid_on_before_first_timestep{false};
+
+    //! Filename to watch for dynamic stop time control (EWS.stop_time_filename,
+    //! default: "stop_time.amrwind")
+    std::string m_ews_stop_time_filename = "stop_time.amrwind";
+
+    //! Number of timesteps between checks for the stop time file
+    //! (EWS.stop_time_check_interval, default: 10)
+    int m_ews_stop_time_check_interval = 10;
+
+    //! If true, force a checkpoint at the new stop time when updated from file
+    //! (EWS.force_checkpoint_on_new_stoptime)
+    bool m_ews_force_checkpoint_on_new_stoptime = false;
+
+    //! If true, force a plot file at the new stop time when updated from file
+    //! (EWS.force_plt_on_new_stoptime)
+    bool m_ews_force_plt_on_new_stoptime = false;
+
+    //! If true, delete the stop time file after it is read and processed
+    //! (EWS.delete_stop_time_file)
+    bool m_ews_delete_stop_time_file = true;
+
+    //! Dynamically update the simulation stop time from a control file.
+    /*!
+     * Checks for a user-specified stop time file (default: "stop_time.amrwind")
+     * at a user-defined interval. If found, reads the first line as the new
+     * stop time. Optionally, the second and third lines can be booleans (0 or
+     * 1) to control whether a plot file and/or checkpoint should be forced at
+     * the new stop time, overriding the EWS defaults. If the stop time is
+     * updated, also updates plot/checkpoint intervals as requested, and
+     * optionally deletes the stop time file after use.
+     *
+     * The behavior is controlled by EWS ParmParse options:
+     *   - EWS.stop_time_filename
+     *   - EWS.stop_time_check_interval
+     *   - EWS.force_plt_on_new_stoptime
+     *   - EWS.force_checkpoint_on_new_stoptime
+     *   - EWS.delete_stop_time_file
+     */
+
+    void update_stop_time_from_file();
 };
 
 } // namespace amr_wind

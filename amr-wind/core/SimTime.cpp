@@ -46,6 +46,20 @@ void SimTime::parse_parameters()
     pp.query("checkpoint_time_interval_reltol", m_chkpt_t_tol);
     pp.query("enforce_checkpoint_dt_reltol", m_force_chkpt_tol);
 
+    // EWS overrides
+    amrex::ParmParse ews("EWS");
+    ews.query("reset_timer_on_restart", m_ews_reset_timer_on_restart);
+    ews.query(
+        "regrid_on_before_first_timestep",
+        m_ews_regrid_on_before_first_timestep);
+    ews.query("stop_time_filename", m_ews_stop_time_filename);
+    ews.query("stop_time_check_interval", m_ews_stop_time_check_interval);
+    ews.query(
+        "force_checkpoint_on_new_stoptime",
+        m_ews_force_checkpoint_on_new_stoptime);
+    ews.query("force_plt_on_new_stoptime", m_ews_force_plt_on_new_stoptime);
+    ews.query("delete_stop_time_file", m_ews_delete_stop_time_file);
+
     if (m_fixed_dt > 0.0) {
         m_dt[0] = m_fixed_dt;
     } else {
@@ -100,6 +114,8 @@ void SimTime::parse_parameters()
 
 bool SimTime::new_timestep()
 {
+    update_stop_time_from_file();
+
     bool continue_sim = continue_simulation();
 
     if (m_is_init && (m_verbose >= 0)) {
@@ -328,6 +344,10 @@ bool SimTime::continue_simulation() const
 
 bool SimTime::do_regrid() const
 {
+    if ((m_time_index == 1) && m_ews_regrid_on_before_first_timestep) {
+        return true;
+    }
+
     return (
         (m_regrid_interval > 0) &&
         ((m_time_index - m_regrid_start_index) > 0) &&
@@ -395,6 +415,17 @@ void SimTime::set_restart_time(int tidx, amrex::Real time)
     m_new_time = time;
     m_cur_time = time;
     m_start_time = time;
+
+    if (m_ews_reset_timer_on_restart) {
+        m_time_index = 0;
+        m_start_time_index = 0;
+        m_regrid_start_index = 0;
+        m_plt_start_index = 0;
+        m_chkpt_start_index = 0;
+        m_new_time = 0.0;
+        m_cur_time = 0.0;
+        m_start_time = 0.0;
+    }
 }
 
 void SimTime::calculate_minimum_enforce_dt_abs_tol()
@@ -415,6 +446,78 @@ void SimTime::calculate_minimum_enforce_dt_abs_tol()
                        m_force_dt_abs_tol, m_postprocess_enforce_dt_tol[npp] *
                                                m_postprocess_time_interval[npp])
                  : m_force_dt_abs_tol);
+    }
+}
+
+void SimTime::update_stop_time_from_file()
+{
+    constexpr double eps = 1.0e-12;
+    static int last_checked = -1;
+    if (m_time_index % m_ews_stop_time_check_interval == 0 &&
+        m_time_index != last_checked) {
+        last_checked = m_time_index;
+        std::ifstream infile(m_ews_stop_time_filename);
+        if (infile) {
+            std::string line;
+            if (std::getline(infile, line)) {
+                try {
+                    double new_stop_time = std::stod(line);
+
+                    // Defaults from EWS ParmParse
+                    bool write_plot = m_ews_force_plt_on_new_stoptime;
+                    bool write_checkpoint =
+                        m_ews_force_checkpoint_on_new_stoptime;
+
+                    // Optionally read plot flag
+                    if (std::getline(infile, line)) {
+                        write_plot = (std::stoi(line) != 0);
+                        // Optionally read checkpoint flag
+                        if (std::getline(infile, line)) {
+                            write_checkpoint = (std::stoi(line) != 0);
+                        }
+                    }
+
+                    if (new_stop_time > 0.0 &&
+                        std::abs(new_stop_time - m_stop_time) > eps) {
+                        amrex::Print()
+                            << "[SimTime] Updating m_stop_time from file: "
+                            << m_stop_time << " -> " << new_stop_time << "\n";
+                        m_stop_time = new_stop_time;
+
+                        if (write_plot) {
+                            m_plt_t_interval = new_stop_time;
+                            amrex::Print()
+                                << "[SimTime] Forcing plot at stop time: "
+                                << new_stop_time << "\n";
+                        }
+                        if (write_checkpoint) {
+                            m_chkpt_t_interval = new_stop_time;
+                            amrex::Print()
+                                << "[SimTime] Forcing checkpoint at stop time: "
+                                << new_stop_time << "\n";
+                        }
+
+                        if (m_ews_delete_stop_time_file) {
+                            if (std::remove(m_ews_stop_time_filename.c_str()) ==
+                                0) {
+                                amrex::Print()
+                                    << "[SimTime] Deleted stop time file: "
+                                    << m_ews_stop_time_filename << "\n";
+                            } else {
+                                amrex::Print()
+                                    << "[SimTime] Warning: Could not "
+                                       "delete stop time file: "
+                                    << m_ews_stop_time_filename << "\n";
+                            }
+                        }
+                    }
+                } catch (...) {
+                    amrex::Print() << "[SimTime] Warning: Could not parse stop "
+                                      "time or flags from "
+                                   << m_ews_stop_time_filename << "\n";
+                }
+            }
+        }
     }
 }
 
