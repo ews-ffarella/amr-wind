@@ -95,18 +95,13 @@ void TerrainRefinement::operator()(
     // Tag arrays
     const auto& tag_arrs = tags.arrays();
 
-    // Get terrain arrays
-    const auto& mfab = (*m_terrain_height)(level);
-    const auto& mterrain_h_arrs = mfab.const_arrays();
-    const auto& mterrain_b_arrs = (*m_terrain_blank)(level).const_arrays();
-
     // TODO: Check if terrain height is initialized
     // If think we are double calling for nothing but
     // otherwise it fails we restart from checkpoint
     // See incflo.cpp / init_mesh
     // This is a workaround for the case where the terrain height
     // is not initialized at the start of the simulation.
-    if (level > m_sim.mesh().maxLevel()) {
+    if ((level > m_sim.mesh().maxLevel()) || true) {
         if (verbose) {
             amrex::Print() << "TerrainRefinement " << m_key
                            << " - Initializing height fields for level "
@@ -114,6 +109,14 @@ void TerrainRefinement::operator()(
         }
         terrain_phys.initialize_fields(level, m_sim.mesh().Geom(level));
     }
+
+    // Get terrain arrays
+    m_terrain_height = &(m_sim.repo().get_field("terrain_height"));
+    m_terrain_blank = &(m_sim.repo().get_int_field("terrain_blank"));
+
+    const auto& mfab = (*m_terrain_height)(level);
+    const auto& mterrain_h_arrs = mfab.const_arrays();
+    const auto& mterrain_b_arrs = (*m_terrain_blank)(level).const_arrays();
 
     // Prepare polygon data for GPU
     const bool polygon_is_empty = m_polygon.is_empty();
