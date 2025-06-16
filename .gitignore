@@ -21,4 +21,7 @@ settings.json
 .cache*
 .ccls
 .ccls-cache/
-build/
+build*
+__pycache__/
+docs/sphinx/doxygen
+docs/sphinx/references/auto
