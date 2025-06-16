@@ -46,6 +46,12 @@ public:
     //! Initialize TKE field
     void init_tke(const amrex::Geometry& geom, amrex::MultiFab& tke) const;
 
+    //! Initialize SDR field
+    void init_sdr(const amrex::Geometry& geom, amrex::MultiFab& sdr) const;
+
+    //! Initialize epsilon field
+    void init_eps(const amrex::Geometry& geom, amrex::MultiFab& sdr) const;
+
 private:
     //! Initial velocity components
     amrex::Vector<amrex::Real> m_vel;
@@ -89,6 +95,8 @@ private:
     amrex::Gpu::DeviceVector<amrex::Real> m_prof_u_d;
     amrex::Gpu::DeviceVector<amrex::Real> m_prof_v_d;
     amrex::Gpu::DeviceVector<amrex::Real> m_prof_tke_d;
+    amrex::Gpu::DeviceVector<amrex::Real> m_prof_sdr_d;
+    amrex::Gpu::DeviceVector<amrex::Real> m_prof_eps_d;
     //! Initial density field
     amrex::Real m_rho;
 
@@ -125,6 +133,13 @@ private:
     //! Multiplicative factor for init tke profile
     amrex::Real m_tke_init_factor{0.4};
 
+    //! Initial value for epsilon field
+    amrex::Real m_eps_init{0.1};
+
+    //! Initial value for sdr field
+    //! Default value set based on https://turbmodels.larc.nasa.gov/sst.html
+    amrex::Real m_sdr_init{25.0};
+
     //! Cutoff height for init tke profile
     amrex::Real m_tke_cutoff_height{250.};
 
@@ -145,6 +160,12 @@ private:
 
     //! Initialize tke profile non-constant
     bool m_tke_init_profile{false};
+
+    //! Initialize sdr profile non-constant
+    bool m_sdr_init_profile{false};
+
+    //! Initialize epsilon profile non-constant
+    bool m_eps_init_profile{false};
 
     //! Profiles of u, v, and theta are read in from a NetCDF File
     bool m_init_uvtheta_profile{false};

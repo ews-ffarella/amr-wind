@@ -6,6 +6,7 @@
 #include "amr-wind/utilities/FieldPlaneAveragingFine.H"
 #include "amr-wind/core/FieldBCOps.H"
 #include "amr-wind/wind_energy/MOData.H"
+#include "amr-wind/turbulence/TurbulenceModel.H"
 #include "amr-wind/utilities/constants.H"
 
 namespace amr_wind {
@@ -37,6 +38,15 @@ public:
     //! Update the mean velocity at a given timestep
     void update_umean(
         const VelPlaneAveragingFine& vpa, const FieldPlaneAveragingFine& tpa);
+
+    //! Returns Cmu constant used in RANS ABL wall functions
+    amrex::Real cmu() const
+    {
+        AMREX_ALWAYS_ASSERT(
+            m_sim.turbulence_model().model_name() == "KOmegaSSTABL");
+        auto coeffs = m_sim.turbulence_model().model_coeffs();
+        return coeffs["beta_star"];
+    }
 
     void update_tflux(const amrex::Real tflux);
 
@@ -109,6 +119,54 @@ private:
     std::string m_wall_shear_stress_type{"moeng"};
     std::string m_wall_het_model{"none"};
     amrex::Real m_monin_obukhov_length{constants::LARGE_NUM};
+};
+
+class ABLTKEWallFunc : public FieldBCIface
+{
+public:
+    ABLTKEWallFunc(Field& tke, const ABLWallFunction& wall_fuc);
+
+    void operator()(Field& tke, const FieldState rho_state) override;
+
+    template <typename ShearStress>
+    void
+    wall_model(Field& tke, const FieldState rho_state, const ShearStress& tau);
+
+private:
+    const ABLWallFunction& m_wall_func;
+    std::string m_wall_shear_stress_type{"alinot"};
+};
+
+class ABLSDRWallFunc : public FieldBCIface
+{
+public:
+    ABLSDRWallFunc(Field& sdr, const ABLWallFunction& wall_fuc);
+
+    void operator()(Field& sdr, const FieldState rho_state) override;
+
+    template <typename ShearStress>
+    void
+    wall_model(Field& sdr, const FieldState rho_state, const ShearStress& tau);
+
+private:
+    const ABLWallFunction& m_wall_func;
+    std::string m_wall_shear_stress_type{"alinot"};
+};
+
+class ABLEpsWallFunc : public FieldBCIface
+{
+public:
+    ABLEpsWallFunc(Field& eps, const ABLWallFunction& wall_fuc);
+
+    void operator()(Field& eps, const FieldState rho_state) override;
+
+    template <typename ShearStress>
+    void
+    wall_model(Field& eps, const FieldState rho_state, const ShearStress& tau);
+
+private:
+    const ABLWallFunction& m_wall_func;
+    std::string m_wall_shear_stress_type{"alinot"};
 };
 
 } // namespace amr_wind

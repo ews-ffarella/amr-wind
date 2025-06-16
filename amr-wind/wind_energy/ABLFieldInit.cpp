@@ -92,6 +92,9 @@ void ABLFieldInit::initialize_from_inputfile()
     pp_abl.query("init_tke_beare_factor", m_tke_init_factor);
     pp_abl.query("init_tke_cutoff_height", m_tke_cutoff_height);
 
+    pp_abl.query("initial_sdr_value", m_sdr_init);
+    pp_abl.query("init_eps", m_eps_init);
+
     pp_abl.query("linear_profile", m_linear_profile);
 
     pp_abl.query("top_velocity", m_top_vel);
@@ -466,6 +469,116 @@ void ABLFieldInit::init_tke(
                     tke_arrs[nbx](i, j, k) = tiny;
                 }
             });
+    }
+    amrex::Gpu::streamSynchronize();
+}
+
+//! Initialize SDR field at the beginning of the simulation (applicable to
+//! k-Omega SST model)
+void ABLFieldInit::init_sdr(
+    const amrex::Geometry& geom, amrex::MultiFab& sdr_mf) const
+{
+    sdr_mf.setVal(m_sdr_init);
+
+    if (!m_sdr_init_profile && !m_initial_wind_profile) {
+        return;
+    }
+
+    const auto& dx = geom.CellSizeArray();
+    const auto& problo = geom.ProbLoArray();
+    const auto tke_cutoff_height = m_tke_cutoff_height;
+    const auto tke_init_factor = m_tke_init_factor;
+
+    const auto& sdr_arrs = sdr_mf.arrays();
+    const auto tiny = std::numeric_limits<amrex::Real>::epsilon();
+    if (m_initial_wind_profile) {
+        const auto* xterrain_ptr = m_xterrain.data();
+        const auto* yterrain_ptr = m_yterrain.data();
+        const auto* zterrain_ptr = m_zterrain.data();
+        const amrex::Real* windh = m_windht_d.data();
+        const bool terrain_aligned_profile = m_terrain_aligned_profile;
+        const int nwvals = static_cast<int>(m_wind_heights.size());
+        const amrex::Real* sdr_data = m_prof_sdr_d.data();
+        const auto xterrain_size = m_xterrain.size();
+        const auto yterrain_size = m_yterrain.size();
+        amrex::ParallelFor(
+            sdr_mf,
+            [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+                amrex::Real x = problo[0] + (i + 0.5) * dx[0];
+                amrex::Real y = problo[1] + (j + 0.5) * dx[1];
+                amrex::Real z = problo[2] + (k + 0.5) * dx[2];
+                const amrex::Real terrainHt =
+                    terrain_aligned_profile
+                        ? interp::bilinear(
+                              xterrain_ptr, xterrain_ptr + xterrain_size,
+                              yterrain_ptr, yterrain_ptr + yterrain_size,
+                              zterrain_ptr, x, y)
+                        : 0.0;
+                z = std::max(0.5 * dx[2], z - terrainHt);
+                const amrex::Real sdr_prof =
+                    (nwvals > 0)
+                        ? interp::linear(windh, windh + nwvals, sdr_data, z)
+                        : tiny;
+
+                sdr_arrs[nbx](i, j, k) = sdr_prof;
+            });
+    } else {
+        // Profile definition from Beare et al. (2006)
+    }
+    amrex::Gpu::streamSynchronize();
+}
+
+//! Initialize epsilon field at the beginning of the simulation (applicable to
+//! k-Epsilon model)
+void ABLFieldInit::init_eps(
+    const amrex::Geometry& geom, amrex::MultiFab& eps_mf) const
+{
+    eps_mf.setVal(m_eps_init);
+
+    if (!m_eps_init_profile && !m_initial_wind_profile) {
+        return;
+    }
+
+    const auto& dx = geom.CellSizeArray();
+    const auto& problo = geom.ProbLoArray();
+    const auto tke_cutoff_height = m_tke_cutoff_height;
+    const auto tke_init_factor = m_tke_init_factor;
+
+    const auto& eps_arrs = eps_mf.arrays();
+    const auto tiny = std::numeric_limits<amrex::Real>::epsilon();
+    if (m_initial_wind_profile) {
+        const auto* xterrain_ptr = m_xterrain.data();
+        const auto* yterrain_ptr = m_yterrain.data();
+        const auto* zterrain_ptr = m_zterrain.data();
+        const amrex::Real* windh = m_windht_d.data();
+        const bool terrain_aligned_profile = m_terrain_aligned_profile;
+        const int nwvals = static_cast<int>(m_wind_heights.size());
+        const amrex::Real* eps_data = m_prof_eps_d.data();
+        const auto xterrain_size = m_xterrain.size();
+        const auto yterrain_size = m_yterrain.size();
+        amrex::ParallelFor(
+            eps_mf,
+            [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+                amrex::Real x = problo[0] + (i + 0.5) * dx[0];
+                amrex::Real y = problo[1] + (j + 0.5) * dx[1];
+                amrex::Real z = problo[2] + (k + 0.5) * dx[2];
+                const amrex::Real terrainHt =
+                    terrain_aligned_profile
+                        ? interp::bilinear(
+                              xterrain_ptr, xterrain_ptr + xterrain_size,
+                              yterrain_ptr, yterrain_ptr + yterrain_size,
+                              zterrain_ptr, x, y)
+                        : 0.0;
+                z = std::max(0.5 * dx[2], z - terrainHt);
+                const amrex::Real eps_prof =
+                    (nwvals > 0)
+                        ? interp::linear(windh, windh + nwvals, eps_data, z)
+                        : tiny;
+
+                eps_arrs[nbx](i, j, k) = eps_prof;
+            });
+    } else {
+        // Profile definition from Beare et al. (2006)
     }
     amrex::Gpu::streamSynchronize();
 }

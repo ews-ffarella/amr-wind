@@ -134,6 +134,16 @@ void ABL::initialize_fields(int level, const amrex::Geometry& geom)
         auto& tke = (*m_tke)(level);
         m_field_init->init_tke(geom, tke);
     }
+    if (m_sim.repo().field_exists("sdr")) {
+        m_sdr = &(m_sim.repo().get_field("sdr"));
+        auto& sdr = (*m_sdr)(level);
+        m_field_init->init_sdr(geom, sdr);
+    }
+    if (m_sim.repo().field_exists("eps")) {
+        m_eps = &(m_sim.repo().get_field("eps"));
+        auto& eps = (*m_eps)(level);
+        m_field_init->init_eps(geom, eps);
+    }
 }
 
 void ABL::post_init_actions()
@@ -153,6 +163,17 @@ void ABL::post_init_actions()
     // Register ABL wall function for velocity
     m_velocity.register_custom_bc<ABLVelWallFunc>(m_abl_wall_func);
     (*m_temperature).register_custom_bc<ABLTempWallFunc>(m_abl_wall_func);
+
+    // Register wall functions for TKE, EPS, and SDR variables
+    if (m_sim.repo().field_exists("tke")) {
+        (*m_tke).register_custom_bc<ABLTKEWallFunc>(m_abl_wall_func);
+    }
+    if (m_sim.repo().field_exists("sdr")) {
+        (*m_sdr).register_custom_bc<ABLSDRWallFunc>(m_abl_wall_func);
+    }
+    if (m_sim.repo().field_exists("eps")) {
+        (*m_eps).register_custom_bc<ABLEpsWallFunc>(m_abl_wall_func);
+    }
 
     m_bndry_plane->post_init_actions();
     m_abl_mpl->post_init_actions();
