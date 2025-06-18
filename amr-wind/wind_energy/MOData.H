@@ -16,6 +16,12 @@ namespace amr_wind {
  * the vertical ABL structure in Modelling of Atmospheric Flow Fields,
  * Demetri P Lalas and Corrado F Ratto, January 1996,
  * https://doi.org/10.1142/2975.
+ *
+ * For k-omega:
+ * Alinot, C., & Masson, C. (2005). k-Epsilon Model for the
+ * Atmospheric Boundary Layer Under Various Thermal
+ * Stratifications. Journal of Solar Energy Engineering, 127(4),
+ * 438-443. doi:10.1115/1.2035704
  */
 struct MOData
 {
@@ -79,6 +85,36 @@ struct MOData
         const amrex::Real beta_h,
         const amrex::Real gamma_h);
     void update_fluxes(int max_iters = 25);
+
+    amrex::Real phi_m_alinot() const
+    {
+        return calc_phi_m_alinot(zref / obukhov_len);
+    }
+
+    amrex::Real phi_m_alinot(amrex::Real z) const
+    {
+        return calc_phi_m_alinot(z / obukhov_len);
+    }
+
+    amrex::Real phi_eps_alinot() const
+    {
+        return calc_phi_eps_alinot(zref / obukhov_len);
+    }
+
+    amrex::Real phi_eps_alinot(amrex::Real z) const
+    {
+        return calc_phi_eps_alinot(z / obukhov_len);
+    }
+    amrex::Real calc_phi_m_alinot(amrex::Real zeta) const;
+    static amrex::Real calc_phi_m_alinot(
+        const amrex::Real zeta,
+        const amrex::Real beta_m,
+        const amrex::Real gamma_m);
+    amrex::Real calc_phi_eps_alinot(amrex::Real zeta) const;
+    static amrex::Real calc_phi_eps_alinot(
+        const amrex::Real zeta,
+        const amrex::Real beta_m,
+        const amrex::Real gamma_m);
 };
 
 } // namespace amr_wind
