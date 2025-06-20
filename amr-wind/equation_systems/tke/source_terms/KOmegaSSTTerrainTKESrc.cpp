@@ -54,8 +54,7 @@ void KOmegaSSTTerrainTKESrc::operator()(
                           .state(field_impl::dof_state(fstate))(lev)
                           .const_array(mfi);
 
-    const bool has_terrain =
-        this->m_sim.repo().int_field_exists("terrain_blank");
+    bool has_terrain = this->m_sim.repo().int_field_exists("terrain_blank");
 
     const amrex::Real sponge_start = this->m_meso_start;
     const auto vsize = this->m_wind_heights_d.size();
@@ -64,11 +63,15 @@ void KOmegaSSTTerrainTKESrc::operator()(
 
     amrex::Real psi_m = 0.0;
     amrex::Real phi_e = 0.0;
+    amrex::Real phi_m = 0.0;
     if (this->m_wall_het_model == "mol") {
         psi_m = MOData::calc_psi_m(
             1.5 * dx[2] / this->m_monin_obukhov_length, this->m_beta_m,
             this->m_gamma_m);
         phi_e = MOData::calc_phi_eps(
+            1.5 * dx[2] / this->m_monin_obukhov_length, this->m_beta_m,
+            this->m_gamma_m);
+        phi_m = MOData::calc_phi_m(
             1.5 * dx[2] / this->m_monin_obukhov_length, this->m_beta_m,
             this->m_gamma_m);
     }
@@ -84,23 +87,16 @@ void KOmegaSSTTerrainTKESrc::operator()(
             const amrex::Real uy = vel(i, j, k + 1, 1);
             const amrex::Real m = std::sqrt(ux * ux + uy * uy);
             const amrex::Real ustar =
-                m * kappa / (std::log(3 * z / z0) - psi_m);
+                std::abs(m * kappa / (std::log(0.5 * dx[2] / z0) - psi_m));
 
-            const amrex::Real phi_m = std::log(3 * z / z0) - psi_m;
             const amrex::Real eps =
                 std::pow(ustar, 3) * phi_e / (kappa * 0.5 * dx[2]);
             const amrex::Real tke =
                 std::sqrt((kappa * ustar * 0.5 * dx[2] * eps) / (Cmu * phi_m));
             bcforcing = (tke - tke_arr(i, j, k)) / dt;
-            // amrex::AllPrint()
-            //     << "bcforcing: " << bcforcing << " tke: " << tke_arr(i, j, k)
-            //     << " eps: " << eps << " ustar: " << ustar << " ref_tke: " <<
-            //     tke
-            //     << " phi_m: " << phi_m << " z: " << z << " z0: " << z0
-            //     << " psi_m: " << psi_m << " phi_e: " << phi_e << " ux: " <<
-            //     ux
-            //     << " uy: " << uy << " m: " << m << std::endl;
-            dissip_arr(i, j, k) = eps;
+            const amrex::Real sdr =
+                eps / Cmu / amrex::max<amrex::Real>(tke, 1e-10);
+            // dissip_arr(i, j, k) = eps;
         }
         amrex::Real ref_tke = tke_arr(i, j, k);
         amrex::Real zi =
@@ -115,13 +111,9 @@ void KOmegaSSTTerrainTKESrc::operator()(
         const amrex::Real sponge_forcing =
             1.0 / dt * (tke_arr(i, j, k) - ref_tke);
 
-        // dissip_arr(i, j, k) = std::pow(Cmu, 3) *
-        //                       std::pow(tke_arr(i, j, k), 1.5) /
-        //                       (tlscale_arr(i, j, k) +
-        //                       amr_wind::constants::EPS);
-        src_term(i, j, k) +=
-            shear_prod_arr(i, j, k) + buoy_prod_arr(i, j, k) -
-            factor * dissip_arr(i, j, k) -
+        src_term(i, j, k) += shear_prod_arr(i, j, k) + buoy_prod_arr(i, j, k) -
+                             factor * dissip_arr(i, j, k);
+        src_term(i, j, k) -=
             (1 - static_cast<int>(has_terrain)) * (sponge_forcing - bcforcing);
     });
     if (has_terrain) {
@@ -147,13 +139,14 @@ void KOmegaSSTTerrainTKESrc::operator()(
                 amrex::Real uy = vel(i, j, k + 1, 1);
                 amrex::Real z = 0.5 * dx[2];
                 amrex::Real m = std::sqrt(ux * ux + uy * uy);
-                const amrex::Real phi_m = std::log(3 * z / cell_z0) - psi_m;
-                const amrex::Real ustar =
-                    m * kappa / (std::log(3 * z / cell_z0) - psi_m);
+                const amrex::Real ustar = std::abs(
+                    m * kappa / (std::log(0.5 * dx[2] / cell_z0) - psi_m));
                 const amrex::Real eps =
                     std::pow(ustar, 3) * phi_e / (kappa * 0.5 * dx[2]);
                 const amrex::Real tke = std::sqrt(
                     (kappa * ustar * 0.5 * dx[2] * eps) / (Cmu * phi_m));
+                const amrex::Real sdr =
+                    eps / Cmu / amrex::max<amrex::Real>(tke, 1e-10);
 
                 // const amrex::Real T0 = ref_theta_arr(i, j, k);
                 // const amrex::Real hf = std::abs(gravity[2]) / T0 * heat_flux;
@@ -196,22 +189,24 @@ void KOmegaSSTTerrainTKESrc::operator()(
                     static_cast<int>(has_terrain) *
                         (sponge_forcing - bcforcing);
 
-                if (blank_arr(i, j, k) == 2) {
-                    amrex::AllPrint()
-                        << "src_term: " << src_term(i, j, k)
-                        << " terrainforcing: "
-                        << drag_arr(i, j, k) * terrainforcing
-                        << " bcforcing: " << bcforcing
-                        << " dragforcing: " << blank_arr(i, j, k) * dragforcing
-                        << " tke: " << tke_arr(i, j, k) << " eps: " << eps
-                        << " ustar: " << ustar << " ref_tke: " << tke
-                        << " phi_m: " << phi_m << " z: " << z << " z0: " << z0
-                        << " psi_m: " << psi_m << " phi_e: " << phi_e
-                        << " ux: " << ux << " uy: " << uy << " m: " << m
-                        << " x: " << (problo[0] + (i + 0.5) * dx[0])
-                        << " y: " << (problo[1] + (j + 0.5) * dx[1])
-                        << " z: " << (problo[2] + (k + 0.5) * dx[2])
-                        << std::endl;
+                if (drag_arr(i, j, k) == 1) {
+                    // amrex::AllPrint()
+                    //     << "src_term: " << src_term(i, j, k)
+                    //     << " terrainforcing: " << terrainforcing
+                    //     << " bcforcing: " << bcforcing
+                    //     << " dragforcing: " << blank_arr(i, j, k) *
+                    //     dragforcing
+                    //     << " ref_tke: " << tke << " tke: " << tke_arr(i, j,
+                    //     k)
+                    //     << " ustar: " << ustar << " eps: " << eps
+                    //     << " sdr: " << sdr
+                    //     << " eps (old): " << dissip_arr(i, j, k) << " m: " <<
+                    //     m
+                    //     << " x: " << (problo[0] + (i + 0.5) * dx[0])
+                    //     << " y: " << (problo[1] + (j + 0.5) * dx[1])
+                    //     << " z: " << (problo[2] + (k + 0.5) * dx[2])
+                    //     << " z0: " << z0 << std::endl;
+                    // dissip_arr(i, j, k) = eps;
                 }
             });
     }

@@ -113,6 +113,7 @@ void KOmegaSST<Transport>::update_turbulent_viscosity(
 
     const int nlevels = repo.num_active_levels();
     for (int lev = 0; lev < nlevels; ++lev) {
+
         const auto& lam_mu_arrs = (*lam_mu)(lev).const_arrays();
         const auto& mu_arrs = mu_turb(lev).arrays();
         const auto& gradrho_arrs = (*gradden)(lev).const_arrays();
