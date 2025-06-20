@@ -27,6 +27,7 @@ void ABLFieldInit::initialize_from_inputfile()
     //! Check for wind profile
     pp_abl.query("initial_wind_profile", m_initial_wind_profile);
     pp_abl.query("terrain_aligned_profile", m_terrain_aligned_profile);
+    pp_abl.query("rans_1d_ncols", m_rans_1d_ncols);
     amrex::ParmParse pp_terrain("TerrainDrag");
     pp_terrain.query("terrain_file", m_terrain_file);
     if (m_initial_wind_profile) {
@@ -36,14 +37,29 @@ void ABLFieldInit::initialize_from_inputfile()
             if (!ransfile.good()) {
                 amrex::Abort("Cannot find 1-D RANS profile file " + m_1d_rans);
             }
-            amrex::Real value1, value2, value3, value4, value5, value6;
-            while (ransfile >> value1 >> value2 >> value3 >> value4 >> value5 >>
-                   value6) {
-                m_wind_heights.push_back(value1);
-                m_u_values.push_back(value2);
-                m_v_values.push_back(value3);
-                m_tke_values.push_back(value5);
-                m_dissipation_values.push_back(value6);
+            amrex::Real val;
+            int col = 0;
+            while (ransfile >> val) {
+                switch (col % m_rans_1d_ncols) {
+                case 0:
+                    m_wind_heights.push_back(val);
+                    break;
+                case 1:
+                    m_u_values.push_back(val);
+                    break;
+                case 2:
+                    m_v_values.push_back(val);
+                    break;
+                case 4:
+                    m_tke_values.push_back(val);
+                    break;
+                case 5:
+                    m_dissipation_values.push_back(val);
+                    break;
+                default:
+                    break;
+                }
+                ++col;
             }
         }
         amrex::Vector<amrex::Real> xterrain;

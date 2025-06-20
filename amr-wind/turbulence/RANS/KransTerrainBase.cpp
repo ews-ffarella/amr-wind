@@ -50,20 +50,37 @@ void KransTerrainBase::parse_coeffs()
 
 void KransTerrainBase::load_1d_rans_profile()
 {
+    amrex::ParmParse pp("ABL");
+    int rans_1d_ncols = 5;
+    pp.query("rans_1d_ncols", rans_1d_ncols);
     std::ifstream ransfile(m_1d_rans, std::ios::in);
     if (!ransfile.good()) {
         amrex::Abort("Cannot find 1-D RANS profile file " + m_1d_rans);
     }
-    amrex::Real value1, value2, value3, value4, value5, value6;
-    while (ransfile >> value1 >> value2 >> value3 >> value4 >> value5 >>
-           value6) {
-        m_wind_heights.push_back(value1);
-        m_tke_values.push_back(value5);
-        if (m_is_sdr) {
-            m_sdr_values.push_back(value6);
-        } else {
-            m_eps_values.push_back(value6);
+    amrex::Real val;
+    int col = 0;
+    while (ransfile >> val) {
+        switch (col % rans_1d_ncols) {
+        case 0:
+            m_wind_heights.push_back(val);
+            break;
+        case 4:
+            m_tke_values.push_back(val);
+            break;
+        case 5:
+            if (m_is_sdr) {
+                m_sdr_values.push_back(val);
+            } else {
+                m_eps_values.push_back(val);
+            }
+            break;
+        default:
+            break;
         }
+        ++col;
+    }
+    if (col % rans_1d_ncols != 0) {
+        amrex::Abort("Incomplete row in RANS profile file.");
     }
     int num_wind_values = static_cast<int>(m_wind_heights.size());
     m_wind_heights_d.resize(num_wind_values);

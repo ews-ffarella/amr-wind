@@ -16,19 +16,37 @@ VelocityFreeAtmosphereForcing::VelocityFreeAtmosphereForcing(const CFDSim& sim)
 {
     amrex::ParmParse pp_abl("ABL");
     pp_abl.query("rans_1dprofile_file", m_1d_rans_filename);
+    int rans_1d_ncols = 5;
+    pp_abl.query("rans_1d_ncols", rans_1d_ncols);
     if (!m_1d_rans_filename.empty()) {
         std::ifstream ransfile(m_1d_rans_filename, std::ios::in);
         if (!ransfile.good()) {
             amrex::Abort(
                 "Cannot find 1-D RANS profile file " + m_1d_rans_filename);
         }
-        amrex::Real value1, value2, value3, value4, value5, value6;
-        while (ransfile >> value1 >> value2 >> value3 >> value4 >> value5 >>
-               value6) {
-            m_wind_heights.push_back(value1);
-            m_u_values.push_back(value2);
-            m_v_values.push_back(value3);
-            m_w_values.push_back(value4);
+        amrex::Real val;
+        int col = 0;
+        while (ransfile >> val) {
+            switch (col % rans_1d_ncols) {
+            case 0:
+                m_wind_heights.push_back(val);
+                break;
+            case 1:
+                m_u_values.push_back(val);
+                break;
+            case 2:
+                m_v_values.push_back(val);
+                break;
+            case 3:
+                m_w_values.push_back(val);
+                break;
+            default:
+                break;
+            }
+            ++col;
+        }
+        if (col % rans_1d_ncols != 0) {
+            amrex::Abort("Incomplete row in RANS profile file.");
         }
     } else {
         amrex::Abort("Cannot find 1-D RANS profile file " + m_1d_rans_filename);

@@ -78,6 +78,7 @@ private:
     amrex::Gpu::DeviceVector<amrex::Real> m_zterrain;
     //! File name for 1-D data file
     std::string m_1d_rans;
+    int m_rans_1d_ncols{5}; // number of columns in 1-D RANS file
     amrex::Vector<amrex::Real> m_wind_heights;
     amrex::Vector<amrex::Real> m_u_values;
     amrex::Vector<amrex::Real> m_v_values;
