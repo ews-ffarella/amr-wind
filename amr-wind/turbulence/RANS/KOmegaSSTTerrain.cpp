@@ -23,8 +23,12 @@ KOmegaSSTTerrain<Transport>::KOmegaSSTTerrain(CFDSim& sim)
     , m_sdr_src(sim.repo().declare_field("omega_src", 1))
     , m_sdr_diss(sim.repo().declare_field("sdr_dissipation", 1))
     , m_rho(sim.repo().get_field("density"))
+    , m_walldist(sim.repo().declare_field("wall_dist", 1, 1, 1))
     , m_temperature(sim.repo().get_field("temperature"))
 {
+
+    m_walldist.set_default_fillpatch_bc(sim.time());
+    m_walldist.fillpatch_on_regrid() = true;
 
     auto& tke_eqn =
         sim.pde_manager().register_transport_pde(pde::TKE::pde_name());
@@ -32,9 +36,12 @@ KOmegaSSTTerrain<Transport>::KOmegaSSTTerrain(CFDSim& sim)
 
     auto& sdr_eqn =
         sim.pde_manager().register_transport_pde(pde::SDR::pde_name());
-
-    m_tke = &(tke_eqn.fields().field);
     m_sdr = &(sdr_eqn.fields().field);
+
+    // TKE source term to be added to PDE
+    turb_utils::inject_turbulence_src_terms(
+        pde::TKE::pde_name(), {"KOmegaSSTTerrainTKESrc"});
+
     auto& phy_mgr = this->m_sim.physics_manager();
     if (!phy_mgr.contains("ABL")) {
         amrex::Abort("KOmegaSSTTerrain model only works with ABL physics");
@@ -47,12 +54,6 @@ KOmegaSSTTerrain<Transport>::KOmegaSSTTerrain(CFDSim& sim)
         amrex::ParmParse pp("incflo");
         pp.queryarr("gravity", m_gravity);
     }
-
-    // TKE and omega source term to be added to PDE
-    turb_utils::inject_turbulence_src_terms(
-        pde::TKE::pde_name(), {"KOmegaSTTerrainTKESrc"});
-    turb_utils::inject_turbulence_src_terms(
-        pde::SDR::pde_name(), {"KOmegaSTTerrainSDRSrc"});
 }
 
 template <typename Transport>
@@ -72,6 +73,21 @@ void KOmegaSSTTerrain<Transport>::parse_model_coeffs()
     pp.query("tke_amb", this->m_tke_amb);
     pp.query("sdr_amb", this->m_sdr_amb);
     pp.query("sigma_t", this->m_sigma_t);
+
+    amrex::Print() << "KOmegaSSTTerrain model coefficients:\n"
+                   << "  beta_star: " << this->m_beta_star << "\n"
+                   << "  alpha1: " << this->m_alpha1 << "\n"
+                   << "  alpha2: " << this->m_alpha2 << "\n"
+                   << "  beta1: " << this->m_beta1 << "\n"
+                   << "  beta2: " << this->m_beta2 << "\n"
+                   << "  sigma_k1: " << this->m_sigma_k1 << "\n"
+                   << "  sigma_k2: " << this->m_sigma_k2 << "\n"
+                   << "  sigma_omega1: " << this->m_sigma_omega1 << "\n"
+                   << "  sigma_omega2: " << this->m_sigma_omega2 << "\n"
+                   << "  tke_amb: " << this->m_tke_amb << "\n"
+                   << "  sdr_amb: " << this->m_sdr_amb << "\n"
+                   << "  sigma_t: " << this->m_sigma_t << "\n";
+    ;
 }
 
 template <typename Transport>
@@ -99,6 +115,17 @@ void KOmegaSSTTerrain<Transport>::update_turbulent_viscosity(
 {
     BL_PROFILE(
         "amr-wind::" + this->identifier() + "::update_turbulent_viscosity");
+
+    const bool has_terrain =
+        this->m_sim.repo().int_field_exists("terrain_blank");
+
+    auto* const m_terrain_height =
+        (has_terrain) ? &this->m_sim.repo().get_field("terrain_height")
+                      : nullptr;
+
+    auto* const m_terrain_blank =
+        (has_terrain) ? &this->m_sim.repo().get_int_field("terrain_blank")
+                      : nullptr;
 
     // auto gradT = (this->m_sim.repo()).create_scratch_field(3, 0);
     // fvm::gradient(*gradT, m_temperature.state(fstate));
@@ -144,14 +171,8 @@ void KOmegaSSTTerrain<Transport>::update_turbulent_viscosity(
     const amrex::Real Bfac = this->m_buoyancy_factor;
     const amrex::Real sigmat = this->m_sigma_t;
 
-    const auto& geom_vec = repo.mesh().Geom();
     const int nlevels = repo.num_active_levels();
-    // const amrex::Real surf_flux = m_surf_flux;
-    // const auto tiny = std::numeric_limits<amrex::Real>::epsilon();
     for (int lev = 0; lev < nlevels; ++lev) {
-        const auto& geom = geom_vec[lev];
-        const auto& problo = repo.mesh().Geom(lev).ProbLoArray();
-        const amrex::Real dz = geom.CellSize()[2];
 
         const auto& lam_mu_arrs = (*lam_mu)(lev).const_arrays();
         const auto& mu_arrs = mu_turb(lev).arrays();
@@ -161,8 +182,9 @@ void KOmegaSSTTerrain<Transport>::update_turbulent_viscosity(
         const auto& gradOmega_arrs = (*gradOmega)(lev).const_arrays();
         const auto& tke_arrs = tke(lev).const_arrays();
         const auto& sdr_arrs = sdr(lev).const_arrays();
-        // We get the wall distance from terrain_height
-        // const auto& wd_arrs = (this->m_walldist)(lev).const_arrays();
+        const auto& wd_arrs = (has_terrain)
+                                  ? (*m_terrain_height)(lev).const_arrays()
+                                  : (this->m_walldist)(lev).const_arrays();
         const auto& shear_prod_arrs = (this->m_shear_prod)(lev).arrays();
         const auto& diss_arrs = (this->m_diss)(lev).arrays();
         const auto& sdr_src_arrs = (this->m_sdr_src)(lev).arrays();
@@ -172,22 +194,15 @@ void KOmegaSSTTerrain<Transport>::update_turbulent_viscosity(
         const auto& sdr_lhs_arrs = sdr_lhs(lev).arrays();
         const auto& buoy_arrs = (this->m_buoy_term(lev)).arrays();
 
-        //! Add terrain components
-        const auto* m_terrain_height =
-            &this->m_sim.repo().get_field("terrain_height");
-        const auto* m_terrain_blank =
-            &this->m_sim.repo().get_int_field("terrain_blank");
-        const auto& ht_arrs = (*m_terrain_height)(lev).const_arrays();
-        const auto& blank_arrs = (*m_terrain_blank)(lev).const_arrays();
+        const auto& blank_arrs = has_terrain
+                                     ? (*m_terrain_blank)(lev).const_arrays()
+                                     : amrex::MultiArray4<const int>();
+
         amrex::ParallelFor(
             mu_turb(lev),
             [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
-                const amrex::Real wd = std::max(
-                    problo[2] + (k + 0.5) * dz - ht_arrs[nbx](i, j, k),
-                    0.5 * dz);
-
-                const amrex::Real terrain_factor =
-                    (1.0 - blank_arrs[nbx](i, j, k));
+                const amrex::Real blankTerrain =
+                    (has_terrain) ? 1 - blank_arrs[nbx](i, j, k, 0) : 1.0;
 
                 amrex::Real gko =
                     (gradK_arrs[nbx](i, j, k, 0) *
@@ -197,21 +212,22 @@ void KOmegaSSTTerrain<Transport>::update_turbulent_viscosity(
                      gradK_arrs[nbx](i, j, k, 2) *
                          gradOmega_arrs[nbx](i, j, k, 2));
 
-                amrex::Real cdkomega =
-                    terrain_factor *
-                    amrex::max<amrex::Real>(
-                        1e-10, 2.0 * rho_arrs[nbx](i, j, k) * sigma_omega2 *
-                                   gko / (sdr_arrs[nbx](i, j, k) + 1e-15));
+                amrex::Real cdkomega = amrex::max<amrex::Real>(
+                    1e-10, 2.0 * rho_arrs[nbx](i, j, k) * sigma_omega2 * gko /
+                               (sdr_arrs[nbx](i, j, k) + 1e-15));
 
-                amrex::Real tmp1 = 4.0 * rho_arrs[nbx](i, j, k) * sigma_omega2 *
-                                   tke_arrs[nbx](i, j, k) /
-                                   (cdkomega * wd * wd);
-                amrex::Real tmp2 =
-                    std::sqrt(tke_arrs[nbx](i, j, k)) /
-                    (beta_star * sdr_arrs[nbx](i, j, k) * wd + 1e-15);
+                amrex::Real tmp1 =
+                    4.0 * rho_arrs[nbx](i, j, k) * sigma_omega2 *
+                    tke_arrs[nbx](i, j, k) /
+                    (cdkomega * wd_arrs[nbx](i, j, k) * wd_arrs[nbx](i, j, k));
+                amrex::Real tmp2 = std::sqrt(tke_arrs[nbx](i, j, k)) /
+                                   (beta_star * sdr_arrs[nbx](i, j, k) *
+                                        wd_arrs[nbx](i, j, k) +
+                                    1e-15);
                 amrex::Real tmp3 =
                     500.0 * lam_mu_arrs[nbx](i, j, k) /
-                    (wd * wd * sdr_arrs[nbx](i, j, k) * rho_arrs[nbx](i, j, k) +
+                    (wd_arrs[nbx](i, j, k) * wd_arrs[nbx](i, j, k) *
+                         sdr_arrs[nbx](i, j, k) * rho_arrs[nbx](i, j, k) +
                      1e-15);
                 amrex::Real tmp4 = shear_prod_arrs[nbx](i, j, k);
 
@@ -226,10 +242,10 @@ void KOmegaSSTTerrain<Transport>::update_turbulent_viscosity(
                 amrex::Real f2 = std::tanh(arg2 * arg2);
 
                 mu_arrs[nbx](i, j, k) =
-                    terrain_factor * rho_arrs[nbx](i, j, k) * a1 *
+                    blankTerrain * rho_arrs[nbx](i, j, k) * a1 *
                     tke_arrs[nbx](i, j, k) /
                     amrex::max<amrex::Real>(
-                        a1 * sdr_arrs[nbx](i, j, k), tmp4 * f2, 1e-15);
+                        a1 * sdr_arrs[nbx](i, j, k), tmp4 * f2);
 
                 // Buoyancy term
                 amrex::Real tmpB =
@@ -238,97 +254,94 @@ void KOmegaSSTTerrain<Transport>::update_turbulent_viscosity(
                       gravity[2] * gradrho_arrs[nbx](i, j, k, 2));
 
                 buoy_arrs[nbx](i, j, k) =
-                    terrain_factor * Bfac * tmpB *
+                    blankTerrain * Bfac * tmpB *
                     (mu_arrs[nbx](i, j, k) / rho_arrs[nbx](i, j, k)) / sigmat;
 
                 f1_arrs[nbx](i, j, k) = tmp_f1;
 
                 // For TKE equation:
                 shear_prod_arrs[nbx](i, j, k) =
-                    terrain_factor *
+                    blankTerrain *
                     amrex::min<amrex::Real>(
                         amrex::max<amrex::Real>(
                             mu_arrs[nbx](i, j, k) * tmp4 * tmp4, 0.0),
                         10.0 * beta_star * rho_arrs[nbx](i, j, k) *
                             tke_arrs[nbx](i, j, k) * sdr_arrs[nbx](i, j, k));
 
-                const amrex::Real diss_amb =
-                    beta_star * rho_arrs[nbx](i, j, k) * sdr_amb * tke_amb;
+                const amrex::Real diss_amb = blankTerrain * beta_star *
+                                             rho_arrs[nbx](i, j, k) * sdr_amb *
+                                             tke_amb;
 
-                diss_arrs[nbx](i, j, k) =
-                    terrain_factor *
-                    (-beta_star * rho_arrs[nbx](i, j, k) *
-                         tke_arrs[nbx](i, j, k) * sdr_arrs[nbx](i, j, k) +
-                     diss_amb);
+                diss_arrs[nbx](i, j, k) = -beta_star * rho_arrs[nbx](i, j, k) *
+                                              tke_arrs[nbx](i, j, k) *
+                                              sdr_arrs[nbx](i, j, k) +
+                                          diss_amb;
 
-                tke_lhs_arrs[nbx](i, j, k) =
-                    terrain_factor * (beta_star * rho_arrs[nbx](i, j, k) *
-                                      sdr_arrs[nbx](i, j, k) * delta_t);
+                tke_lhs_arrs[nbx](i, j, k) = blankTerrain * beta_star *
+                                             rho_arrs[nbx](i, j, k) *
+                                             sdr_arrs[nbx](i, j, k) * delta_t;
 
                 // For SDR equation:
                 amrex::Real production_omega =
-                    rho_arrs[nbx](i, j, k) * alpha *
+                    blankTerrain * rho_arrs[nbx](i, j, k) * alpha *
                     amrex::min<amrex::Real>(
                         tmp4 * tmp4, 10.0 * beta_star * sdr_arrs[nbx](i, j, k) *
                                          sdr_arrs[nbx](i, j, k));
 
-                amrex::Real cross_diffusion =
+                amrex::Real cross_diffusion = blankTerrain * (1.0 - tmp_f1) *
+                                              2.0 * rho_arrs[nbx](i, j, k) *
+                                              sigma_omega2 * gko /
+                                              (sdr_arrs[nbx](i, j, k) + 1e-15);
 
-                    ((1.0 - tmp_f1) * 2.0 * rho_arrs[nbx](i, j, k) *
-                     sigma_omega2 * gko / (sdr_arrs[nbx](i, j, k) + 1e-15));
-
-                const amrex::Real sdr_diss_amb =
-                    (beta * rho_arrs[nbx](i, j, k) * sdr_amb * sdr_amb);
+                const amrex::Real sdr_diss_amb = blankTerrain * beta *
+                                                 rho_arrs[nbx](i, j, k) *
+                                                 sdr_amb * sdr_amb;
 
                 if (diff_type == DiffusionType::Crank_Nicolson) {
 
                     tke_lhs_arrs[nbx](i, j, k) =
                         0.5 * tke_lhs_arrs[nbx](i, j, k);
 
-                    sdr_src_arrs[nbx](i, j, k) =
-                        terrain_factor * production_omega;
+                    sdr_src_arrs[nbx](i, j, k) = production_omega;
 
-                    sdr_diss_arrs[nbx](i, j, k) =
-                        terrain_factor * cross_diffusion;
+                    sdr_diss_arrs[nbx](i, j, k) = cross_diffusion;
 
                     sdr_lhs_arrs[nbx](i, j, k) =
-                        terrain_factor *
-                        ((rho_arrs[nbx](i, j, k) * beta *
-                              sdr_arrs[nbx](i, j, k) +
-                          0.5 * std::abs(cross_diffusion) /
-                              (sdr_arrs[nbx](i, j, k) + 1e-15)) *
-                         delta_t);
+                        blankTerrain *
+                        (rho_arrs[nbx](i, j, k) * beta *
+                             sdr_arrs[nbx](i, j, k) +
+                         0.5 * std::abs(cross_diffusion) /
+                             (sdr_arrs[nbx](i, j, k) + 1e-15)) *
+                        delta_t;
                 } else if (diff_type == DiffusionType::Implicit) {
                     /* Source term linearization is based on Florian
                        Menter's (1993) AIAA paper */
                     diss_arrs[nbx](i, j, k) = 0.0;
 
-                    sdr_src_arrs[nbx](i, j, k) =
-                        terrain_factor * production_omega;
+                    sdr_src_arrs[nbx](i, j, k) = production_omega;
 
                     sdr_diss_arrs[nbx](i, j, k) = 0.0;
 
                     sdr_lhs_arrs[nbx](i, j, k) =
-                        terrain_factor *
-                        ((2.0 * rho_arrs[nbx](i, j, k) * beta *
-                              sdr_arrs[nbx](i, j, k) +
-                          std::abs(cross_diffusion) /
-                              (sdr_arrs[nbx](i, j, k) + 1e-15)) *
-                         delta_t);
+                        blankTerrain *
+                        (2.0 * rho_arrs[nbx](i, j, k) * beta *
+                             sdr_arrs[nbx](i, j, k) +
+                         std::abs(cross_diffusion) /
+                             (sdr_arrs[nbx](i, j, k) + 1e-15)) *
+                        delta_t;
 
                 } else {
                     sdr_src_arrs[nbx](i, j, k) =
-                        terrain_factor * (production_omega + cross_diffusion);
+                        production_omega + cross_diffusion;
 
                     sdr_diss_arrs[nbx](i, j, k) =
-                        terrain_factor *
-                        (-rho_arrs[nbx](i, j, k) * beta *
-                             sdr_arrs[nbx](i, j, k) * sdr_arrs[nbx](i, j, k) +
-                         sdr_diss_amb);
+                        -rho_arrs[nbx](i, j, k) * beta * blankTerrain *
+                            sdr_arrs[nbx](i, j, k) * sdr_arrs[nbx](i, j, k) +
+                        sdr_diss_amb;
 
                     sdr_lhs_arrs[nbx](i, j, k) =
-                        terrain_factor * (0.5 * rho_arrs[nbx](i, j, k) * beta *
-                                          sdr_arrs[nbx](i, j, k) * delta_t);
+                        0.5 * rho_arrs[nbx](i, j, k) * blankTerrain * beta *
+                        sdr_arrs[nbx](i, j, k) * delta_t;
                 }
             });
     }
@@ -346,12 +359,22 @@ void KOmegaSSTTerrain<Transport>::update_scalar_diff(
     auto lam_mu = (this->m_transport).mu();
     const auto& mu_turb = this->mu_turb();
 
+    const bool has_terrain =
+        this->m_sim.repo().int_field_exists("terrain_blank");
+
+    auto* const m_terrain_blank =
+        (has_terrain) ? &this->m_sim.repo().get_int_field("terrain_blank")
+                      : nullptr;
+
     if (name == pde::TKE::var_name()) {
         const amrex::Real sigma_k1 = this->m_sigma_k1;
         const amrex::Real sigma_k2 = this->m_sigma_k2;
         const auto& repo = deff.repo();
         const int nlevels = repo.num_active_levels();
         for (int lev = 0; lev < nlevels; ++lev) {
+            const auto& blank_arrs =
+                has_terrain ? (*m_terrain_blank)(lev).const_arrays()
+                            : amrex::MultiArray4<const int>();
             const auto& lam_mu_arrs = (*lam_mu)(lev).const_arrays();
             const auto& mu_arrs = mu_turb(lev).const_arrays();
             const auto& f1_arrs = (this->m_f1)(lev).const_arrays();
@@ -359,11 +382,14 @@ void KOmegaSSTTerrain<Transport>::update_scalar_diff(
             amrex::ParallelFor(
                 deff(lev),
                 [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+                    const amrex::Real blankTerrain =
+                        (has_terrain) ? 1 - blank_arrs[nbx](i, j, k, 0) : 1.0;
                     deff_arrs[nbx](i, j, k) =
                         lam_mu_arrs[nbx](i, j, k) +
                         (f1_arrs[nbx](i, j, k) * (sigma_k1 - sigma_k2) +
                          sigma_k2) *
                             mu_arrs[nbx](i, j, k);
+                    deff_arrs[nbx](i, j, k) *= blankTerrain;
                 });
         }
         amrex::Gpu::streamSynchronize();
@@ -373,6 +399,9 @@ void KOmegaSSTTerrain<Transport>::update_scalar_diff(
         const auto& repo = deff.repo();
         const int nlevels = repo.num_active_levels();
         for (int lev = 0; lev < nlevels; ++lev) {
+            const auto& blank_arrs =
+                has_terrain ? (*m_terrain_blank)(lev).const_arrays()
+                            : amrex::MultiArray4<const int>();
             const auto& lam_mu_arrs = (*lam_mu)(lev).const_arrays();
             const auto& mu_arrs = mu_turb(lev).const_arrays();
             const auto& f1_arrs = (this->m_f1)(lev).const_arrays();
@@ -380,11 +409,14 @@ void KOmegaSSTTerrain<Transport>::update_scalar_diff(
             amrex::ParallelFor(
                 deff(lev),
                 [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+                    const amrex::Real blankTerrain =
+                        (has_terrain) ? 1 - blank_arrs[nbx](i, j, k, 0) : 1.0;
                     deff_arrs[nbx](i, j, k) =
                         lam_mu_arrs[nbx](i, j, k) +
                         (f1_arrs[nbx](i, j, k) * (sigma_omega1 - sigma_omega2) +
                          sigma_omega2) *
                             mu_arrs[nbx](i, j, k);
+                    deff_arrs[nbx](i, j, k) *= blankTerrain;
                 });
         }
         amrex::Gpu::streamSynchronize();

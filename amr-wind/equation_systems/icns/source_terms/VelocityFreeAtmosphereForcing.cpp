@@ -22,8 +22,9 @@ VelocityFreeAtmosphereForcing::VelocityFreeAtmosphereForcing(const CFDSim& sim)
             amrex::Abort(
                 "Cannot find 1-D RANS profile file " + m_1d_rans_filename);
         }
-        amrex::Real value1, value2, value3, value4, value5;
-        while (ransfile >> value1 >> value2 >> value3 >> value4 >> value5) {
+        amrex::Real value1, value2, value3, value4, value5, value6;
+        while (ransfile >> value1 >> value2 >> value3 >> value4 >> value5 >>
+               value6) {
             m_wind_heights.push_back(value1);
             m_u_values.push_back(value2);
             m_v_values.push_back(value3);

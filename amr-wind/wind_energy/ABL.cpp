@@ -134,6 +134,12 @@ void ABL::initialize_fields(int level, const amrex::Geometry& geom)
         auto& tke = (*m_tke)(level);
         m_field_init->init_tke(geom, tke);
     }
+
+    if (m_sim.repo().field_exists("sdr")) {
+        m_sdr = &(m_sim.repo().get_field("sdr"));
+        auto& sdr = (*m_sdr)(level);
+        m_field_init->init_sdr(geom, sdr);
+    }
 }
 
 void ABL::post_init_actions()

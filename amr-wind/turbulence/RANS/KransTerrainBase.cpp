@@ -1,5 +1,5 @@
 
-#include "amr-wind/turbulence/RANS/KOmegaSSTTerrainBase.H"
+#include "amr-wind/turbulence/RANS/KransTerrainBase.H"
 #include <fstream>
 #include <AMReX_ParmParse.H>
 
@@ -7,24 +7,23 @@
 
 namespace amr_wind::pde {
 
-KwSSTTerrainBase::KwSSTTerrainBase(const CFDSim& sim)
-    : m_sim(sim)
-    , m_terrain_height(sim.repo().get_field("terrain_height"))
-    , m_terrain_z0(sim.repo().get_field("terrain_z0"))
+KransTerrainBase::KransTerrainBase(const CFDSim& sim, bool is_sdr)
+    : m_sim(sim), m_is_sdr(is_sdr)
+
 {
     parse_coeffs();
 }
 
-void KwSSTTerrainBase::parse_coeffs()
+void KransTerrainBase::parse_coeffs()
 {
     amrex::ParmParse pp("ABL");
-    pp.query("Cmu", m_Cmu);
-    pp.query("kappa", m_kappa);
-    pp.query("surface_roughness_z0", m_z0);
-    pp.query("surface_temp_flux", m_heat_flux);
     pp.query("meso_sponge_start", m_meso_start);
     pp.query("rans_1dprofile_file", m_1d_rans);
     pp.query("horizontal_sponge_tke", m_horizontal_sponge);
+
+    pp.query("kappa", m_kappa);
+    pp.query("surface_roughness_z0", m_z0);
+    pp.query("surface_temp_flux", m_heat_flux);
     pp.query("wall_het_model", m_wall_het_model);
     pp.query("monin_obukhov_length", m_monin_obukhov_length);
     pp.query("mo_gamma_m", m_gamma_m);
@@ -49,7 +48,7 @@ void KwSSTTerrainBase::parse_coeffs()
     }
 }
 
-void KwSSTTerrainBase::load_1d_rans_profile()
+void KransTerrainBase::load_1d_rans_profile()
 {
     std::ifstream ransfile(m_1d_rans, std::ios::in);
     if (!ransfile.good()) {
@@ -60,24 +59,19 @@ void KwSSTTerrainBase::load_1d_rans_profile()
            value6) {
         m_wind_heights.push_back(value1);
         m_tke_values.push_back(value5);
-        m_sdr_values.push_back(value6);
+        if (m_is_sdr) {
+            m_sdr_values.push_back(value6);
+        } else {
+            m_eps_values.push_back(value6);
+        }
     }
     int num_wind_values = static_cast<int>(m_wind_heights.size());
     m_wind_heights_d.resize(num_wind_values);
     m_tke_values_d.resize(num_wind_values);
     m_sdr_values_d.resize(num_wind_values);
-    amrex::Gpu::copy(
-        amrex::Gpu::hostToDevice, m_wind_heights.begin(), m_wind_heights.end(),
-        m_wind_heights_d.begin());
-    amrex::Gpu::copy(
-        amrex::Gpu::hostToDevice, m_tke_values.begin(), m_tke_values.end(),
-        m_tke_values_d.begin());
-    amrex::Gpu::copy(
-        amrex::Gpu::hostToDevice, m_sdr_values.begin(), m_sdr_values.end(),
-        m_sdr_values_d.begin());
 }
 
-void KwSSTTerrainBase::apply_horizontal_sponge(
+void KransTerrainBase::apply_horizontal_sponge(
     const amrex::Box& bx,
     const amrex::Real* problo,
     const amrex::Real* probhi,

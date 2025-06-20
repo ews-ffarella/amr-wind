@@ -1,5 +1,5 @@
-#ifndef KOMEGASSTTERRAIN_H
-#define KOMEGASSTTERRAIN_H
+#ifndef KOmegaSSTTerrain_H
+#define KOmegaSSTTerrain_H
 
 #include <string>
 #include "amr-wind/turbulence/TurbModelBase.H"
@@ -72,10 +72,10 @@ private:
     Field& m_sdr_src;
     Field& m_sdr_diss;
     Field& m_rho;
-    // Field& m_walldist // Replaced by terrain_height for now
+    Field& m_walldist;
 
-    Field* m_tke{nullptr};
-    Field* m_sdr{nullptr};
+    Field* m_tke;
+    Field* m_sdr;
 
     //! Turbulence constants
     amrex::Real m_beta_star{0.09};
@@ -106,4 +106,4 @@ private:
 
 } // namespace amr_wind::turbulence
 
-#endif /* KOMEGASSTTERRAIN_H */
+#endif /* KOmegaSSTTerrain_H */

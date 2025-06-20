@@ -3,22 +3,24 @@
 
 #include "amr-wind/transport_models/TransportModel.H"
 #include "amr-wind/equation_systems/tke/TKESource.H"
-#include "amr-wind/turbulence/RANS/KOmegaSSTTerrainBase.H"
+#include "amr-wind/turbulence/RANS/KransTerrainBase.H"
 #include "amr-wind/utilities/constants.H"
 #include "amr-wind/wind_energy/MOData.H"
 
 namespace amr_wind::pde::tke {
 
-class KOmegaSTTerrainTKESrc
-    : public TKESource::Register<KOmegaSTTerrainTKESrc>
-    , public pde::KwSSTTerrainBase
+class KOmegaSSTTerrainTKESrc
+    : public TKESource::Register<KOmegaSSTTerrainTKESrc>
+    , public pde::KransTerrainBase
 {
 public:
-    static std::string identifier() { return "KOmegaSTTerrainTKESrc"; }
+    static std::string identifier() { return "KOmegaSSTTerrainTKESrc"; }
 
-    explicit KOmegaSTTerrainTKESrc(const CFDSim& /*sim*/);
+    explicit KOmegaSSTTerrainTKESrc(const CFDSim& /*sim*/);
 
-    ~KOmegaSTTerrainTKESrc() override;
+    ~KOmegaSSTTerrainTKESrc() override;
+
+    void parse_coeffs();
 
     void operator()(
         const int lev,
@@ -32,6 +34,7 @@ private:
     Field& m_diss;
     Field& m_buoy_term;
     Field& m_tke;
+    amrex::Real m_Cmu{1.0 / 5.48 / 5.48}; // 0.033 (atmospheric)
 };
 
 } // namespace amr_wind::pde::tke
