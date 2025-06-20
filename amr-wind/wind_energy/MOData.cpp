@@ -104,4 +104,36 @@ void MOData::update_fluxes(int max_iters)
     }
 }
 
+amrex::Real MOData::calc_phi_m(
+    amrex::Real zeta, const amrex::Real beta_m, const amrex::Real gamma_m)
+{
+    if (zeta > 0) {
+        return 1.0 + gamma_m * zeta;
+    }
+    const amrex::Real x = std::sqrt(std::sqrt(1 - beta_m * zeta));
+    return 1.0 / x;
+}
+
+amrex::Real MOData::calc_phi_m(amrex::Real zeta) const
+{
+    return calc_phi_m(zeta, beta_m, gamma_m);
+}
+
+amrex::Real MOData::calc_phi_eps(
+    const amrex::Real zeta, const amrex::Real beta_m, const amrex::Real gamma_m)
+{
+    if (zeta > 0) {
+        return calc_phi_m(zeta, beta_m, gamma_m) - zeta;
+    }
+    return 1.0 - zeta;
+}
+
+amrex::Real MOData::calc_phi_eps(const amrex::Real zeta) const
+{
+    if (zeta > 0) {
+        return calc_phi_m(zeta) - zeta;
+    }
+    return 1.0 - zeta;
+}
+
 } // namespace amr_wind

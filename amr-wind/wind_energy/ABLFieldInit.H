@@ -46,6 +46,13 @@ public:
     //! Initialize TKE field
     void init_tke(const amrex::Geometry& geom, amrex::MultiFab& tke) const;
 
+    //! Initialize SDR field
+    void init_sdr(const amrex::Geometry& geom, amrex::MultiFab& sdr) const;
+
+    //! Initialize Wall Distance field
+    static void
+    init_walldist(const amrex::Geometry& geom, amrex::MultiFab& walldist);
+
 private:
     //! Initial velocity components
     amrex::Vector<amrex::Real> m_vel;
@@ -75,10 +82,12 @@ private:
     amrex::Gpu::DeviceVector<amrex::Real> m_zterrain;
     //! File name for 1-D data file
     std::string m_1d_rans;
+    int m_rans_1d_ncols{5}; // number of columns in 1-D RANS file
     amrex::Vector<amrex::Real> m_wind_heights;
     amrex::Vector<amrex::Real> m_u_values;
     amrex::Vector<amrex::Real> m_v_values;
     amrex::Vector<amrex::Real> m_tke_values;
+    amrex::Vector<amrex::Real> m_dissipation_values;
     ///@}
 
     // Device copies of the above arrays
@@ -89,6 +98,7 @@ private:
     amrex::Gpu::DeviceVector<amrex::Real> m_prof_u_d;
     amrex::Gpu::DeviceVector<amrex::Real> m_prof_v_d;
     amrex::Gpu::DeviceVector<amrex::Real> m_prof_tke_d;
+    amrex::Gpu::DeviceVector<amrex::Real> m_prof_dissip_d;
     //! Initial density field
     amrex::Real m_rho;
 
@@ -121,6 +131,9 @@ private:
 
     //! Initial value for tke field
     amrex::Real m_tke_init{0.1};
+
+    //! Initial value for sdr field
+    amrex::Real m_sdr_init{0.1};
 
     //! Multiplicative factor for init tke profile
     amrex::Real m_tke_init_factor{0.4};

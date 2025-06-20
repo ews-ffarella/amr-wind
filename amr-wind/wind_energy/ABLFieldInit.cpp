@@ -27,6 +27,7 @@ void ABLFieldInit::initialize_from_inputfile()
     //! Check for wind profile
     pp_abl.query("initial_wind_profile", m_initial_wind_profile);
     pp_abl.query("terrain_aligned_profile", m_terrain_aligned_profile);
+    pp_abl.query("rans_1d_ncols", m_rans_1d_ncols);
     amrex::ParmParse pp_terrain("TerrainDrag");
     pp_terrain.query("terrain_file", m_terrain_file);
     if (m_initial_wind_profile) {
@@ -36,12 +37,41 @@ void ABLFieldInit::initialize_from_inputfile()
             if (!ransfile.good()) {
                 amrex::Abort("Cannot find 1-D RANS profile file " + m_1d_rans);
             }
-            amrex::Real value1, value2, value3, value4, value5;
-            while (ransfile >> value1 >> value2 >> value3 >> value4 >> value5) {
-                m_wind_heights.push_back(value1);
-                m_u_values.push_back(value2);
-                m_v_values.push_back(value3);
-                m_tke_values.push_back(value5);
+            amrex::Real val;
+            int col = 0;
+            while (ransfile >> val) {
+                switch (col % m_rans_1d_ncols) {
+                case 0:
+                    m_wind_heights.push_back(val);
+                    break;
+                case 1:
+                    m_u_values.push_back(val);
+                    break;
+                case 2:
+                    m_v_values.push_back(val);
+                    break;
+                case 4:
+                    if (val <= 0.0) {
+                        amrex::Abort(
+                            "Negative TKE value in RANS profile file: " +
+                            m_1d_rans);
+                    }
+                    m_tke_values.push_back(val);
+                    break;
+                case 5:
+                    if (val <= 0.0) {
+                        amrex::Abort(
+                            "Negative dissipation value in RANS profile "
+                            "file: " +
+                            m_1d_rans);
+                    }
+                    m_dissipation_values.push_back(val);
+                    amrex::Print() << "Dissipation: " << val << std::endl;
+                    break;
+                default:
+                    break;
+                }
+                ++col;
             }
         }
         amrex::Vector<amrex::Real> xterrain;
@@ -134,6 +164,7 @@ void ABLFieldInit::initialize_from_inputfile()
         m_prof_u_d.resize(num_wind_values);
         m_prof_v_d.resize(num_wind_values);
         m_prof_tke_d.resize(num_wind_values);
+        m_prof_dissip_d.resize(num_wind_values);
         amrex::Gpu::copy(
             amrex::Gpu::hostToDevice, m_wind_heights.begin(),
             m_wind_heights.end(), m_windht_d.begin());
@@ -146,6 +177,9 @@ void ABLFieldInit::initialize_from_inputfile()
         amrex::Gpu::copy(
             amrex::Gpu::hostToDevice, m_tke_values.begin(), m_tke_values.end(),
             m_prof_tke_d.begin());
+        amrex::Gpu::copy(
+            amrex::Gpu::hostToDevice, m_dissipation_values.begin(),
+            m_dissipation_values.end(), m_prof_dissip_d.begin());
     }
     amrex::Gpu::copy(
         amrex::Gpu::hostToDevice, m_theta_heights.begin(),
@@ -467,6 +501,91 @@ void ABLFieldInit::init_tke(
                 }
             });
     }
+    amrex::Gpu::streamSynchronize();
+}
+
+//! Initialize sfs tke field at the beginning of the simulation
+void ABLFieldInit::init_sdr(
+    const amrex::Geometry& geom, amrex::MultiFab& sdr_mf) const
+{
+    sdr_mf.setVal(m_sdr_init);
+
+    if (!m_tke_init_profile && !m_initial_wind_profile) {
+        return;
+    }
+
+    const auto& dx = geom.CellSizeArray();
+    const auto& problo = geom.ProbLoArray();
+    const auto sdr_cutoff_height = m_tke_cutoff_height;
+    const auto sdr_init_factor = m_tke_init_factor;
+
+    const auto& sdr_arrs = sdr_mf.arrays();
+    const auto tiny = std::numeric_limits<amrex::Real>::epsilon();
+    if (m_initial_wind_profile) {
+        const auto* xterrain_ptr = m_xterrain.data();
+        const auto* yterrain_ptr = m_yterrain.data();
+        const auto* zterrain_ptr = m_zterrain.data();
+        const amrex::Real* windh = m_windht_d.data();
+        const bool terrain_aligned_profile = m_terrain_aligned_profile;
+        const int nwvals = static_cast<int>(m_wind_heights.size());
+        const amrex::Real* sdr_data = m_prof_dissip_d.data();
+        const auto xterrain_size = m_xterrain.size();
+        const auto yterrain_size = m_yterrain.size();
+        amrex::ParallelFor(
+            sdr_mf,
+            [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+                amrex::Real x = problo[0] + (i + 0.5) * dx[0];
+                amrex::Real y = problo[1] + (j + 0.5) * dx[1];
+                amrex::Real z = problo[2] + (k + 0.5) * dx[2];
+                const amrex::Real terrainHt =
+                    terrain_aligned_profile
+                        ? interp::bilinear(
+                              xterrain_ptr, xterrain_ptr + xterrain_size,
+                              yterrain_ptr, yterrain_ptr + yterrain_size,
+                              zterrain_ptr, x, y)
+                        : 0.0;
+                z = std::max(0.5 * dx[2], z - terrainHt);
+                const amrex::Real sdr_prof =
+                    (nwvals > 0)
+                        ? interp::linear(windh, windh + nwvals, sdr_data, z)
+                        : tiny;
+
+                sdr_arrs[nbx](i, j, k) = sdr_prof;
+            });
+    } else {
+        // Profile definition from Beare et al. (2006)
+        amrex::ParallelFor(
+            sdr_mf,
+            [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+                const amrex::Real z = problo[2] + (k + 0.5) * dx[2];
+
+                if (z < sdr_cutoff_height) {
+                    sdr_arrs[nbx](i, j, k) =
+                        sdr_init_factor *
+                        std::pow(1. - z / sdr_cutoff_height, 3);
+                } else {
+                    sdr_arrs[nbx](i, j, k) = tiny;
+                }
+            });
+    }
+    amrex::Gpu::streamSynchronize();
+}
+
+//! Initialize sfs tke field at the beginning of the simulation
+void ABLFieldInit::init_walldist(
+    const amrex::Geometry& geom, amrex::MultiFab& walldist_mf)
+{
+
+    const auto& dx = geom.CellSizeArray();
+    const auto& problo = geom.ProbLoArray();
+    const auto& wd_arrs = walldist_mf.arrays();
+
+    amrex::ParallelFor(
+        walldist_mf,
+        [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+            wd_arrs[nbx](i, j, k) = problo[2] + (k + 0.5) * dx[2];
+        });
+
     amrex::Gpu::streamSynchronize();
 }
 

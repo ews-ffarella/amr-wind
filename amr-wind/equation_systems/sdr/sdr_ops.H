@@ -36,12 +36,41 @@ struct PostSolveOp<SDR>
 
     void operator()(const amrex::Real time)
     {
-        field_ops::lower_bound(m_fields.field, clip_value);
+        // cppcheck-suppress constVariableReference
+        auto& field = m_fields.field;
+        const auto& repo = field.repo();
+        const int nlevels = repo.num_active_levels();
+        const auto clip_value = m_clip_value;
+        for (int lev = 0; lev < nlevels; ++lev) {
+            const auto& field_arrs = field(lev).arrays();
+            amrex::ParallelFor(
+                field(lev),
+                [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+                    field_arrs[nbx](i, j, k) = (field_arrs[nbx](i, j, k) < 0.0)
+                                                   ? clip_value
+                                                   : field_arrs[nbx](i, j, k);
+                });
+            const bool has_terrain = repo.int_field_exists("terrain_blank");
+            if (has_terrain) {
+                const IntField& m_terrain_blank =
+                    repo.get_int_field("terrain_blank");
+                const auto& blank_arrs = m_terrain_blank(lev).arrays();
+                amrex::ParallelFor(
+                    field(lev), [=] AMREX_GPU_DEVICE(
+                                    int nbx, int i, int j, int k) noexcept {
+                        field_arrs[nbx](i, j, k) =
+                            (blank_arrs[nbx](i, j, k) == 1)
+                                ? clip_value
+                                : field_arrs[nbx](i, j, k);
+                    });
+            }
+        }
+        amrex::Gpu::streamSynchronize();
         m_fields.field.fillpatch(time);
     }
 
     PDEFields& m_fields;
-    amrex::Real clip_value{1.0e-8};
+    amrex::Real m_clip_value{1.0e-8};
 };
 
 template <typename Scheme>
