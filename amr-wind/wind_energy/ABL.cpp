@@ -140,6 +140,11 @@ void ABL::initialize_fields(int level, const amrex::Geometry& geom)
         auto& sdr = (*m_sdr)(level);
         m_field_init->init_sdr(geom, sdr);
     }
+
+    if (m_sim.repo().field_exists("walldist")) {
+        m_field_init->init_walldist(
+            geom, m_sim.repo().get_field("walldist")(level));
+    }
 }
 
 void ABL::post_init_actions()

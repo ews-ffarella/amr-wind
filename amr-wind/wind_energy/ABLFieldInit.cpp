@@ -51,10 +51,22 @@ void ABLFieldInit::initialize_from_inputfile()
                     m_v_values.push_back(val);
                     break;
                 case 4:
+                    if (val <= 0.0) {
+                        amrex::Abort(
+                            "Negative TKE value in RANS profile file: " +
+                            m_1d_rans);
+                    }
                     m_tke_values.push_back(val);
                     break;
                 case 5:
+                    if (val <= 0.0) {
+                        amrex::Abort(
+                            "Negative dissipation value in RANS profile "
+                            "file: " +
+                            m_1d_rans);
+                    }
                     m_dissipation_values.push_back(val);
+                    amrex::Print() << "Dissipation: " << val << std::endl;
                     break;
                 default:
                     break;
@@ -556,6 +568,24 @@ void ABLFieldInit::init_sdr(
                 }
             });
     }
+    amrex::Gpu::streamSynchronize();
+}
+
+//! Initialize sfs tke field at the beginning of the simulation
+void ABLFieldInit::init_walldist(
+    const amrex::Geometry& geom, amrex::MultiFab& walldist_mf)
+{
+
+    const auto& dx = geom.CellSizeArray();
+    const auto& problo = geom.ProbLoArray();
+    const auto& wd_arrs = walldist_mf.arrays();
+
+    amrex::ParallelFor(
+        walldist_mf,
+        [=] AMREX_GPU_DEVICE(int nbx, int i, int j, int k) noexcept {
+            wd_arrs[nbx](i, j, k) = problo[2] + (k + 0.5) * dx[2];
+        });
+
     amrex::Gpu::streamSynchronize();
 }
 

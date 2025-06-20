@@ -49,6 +49,10 @@ public:
     //! Initialize SDR field
     void init_sdr(const amrex::Geometry& geom, amrex::MultiFab& sdr) const;
 
+    //! Initialize Wall Distance field
+    static void
+    init_walldist(const amrex::Geometry& geom, amrex::MultiFab& walldist);
+
 private:
     //! Initial velocity components
     amrex::Vector<amrex::Real> m_vel;
