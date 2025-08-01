@@ -79,6 +79,17 @@ struct MOData
         const amrex::Real beta_h,
         const amrex::Real gamma_h);
     void update_fluxes(int max_iters = 25);
+
+    amrex::Real calc_phi_m(amrex::Real zeta) const;
+    static amrex::Real calc_phi_m(
+        const amrex::Real zeta,
+        const amrex::Real beta_m,
+        const amrex::Real gamma_m);
+    amrex::Real calc_phi_eps(amrex::Real zeta) const;
+    static amrex::Real calc_phi_eps(
+        const amrex::Real zeta,
+        const amrex::Real beta_m,
+        const amrex::Real gamma_m);
 };
 
 } // namespace amr_wind
