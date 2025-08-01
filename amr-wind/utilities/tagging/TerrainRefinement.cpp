@@ -242,7 +242,7 @@ void TerrainRefinement::operator()(
 
                 // 2. Check vertical distance
                 if ((cellHt < -buffer_z_lo) ||
-                    (cellHt > std::max(vertical_distance, buffer_z_hi))) {
+                    (cellHt > (vertical_distance + buffer_z_hi))) {
                     return;
                 }
 
